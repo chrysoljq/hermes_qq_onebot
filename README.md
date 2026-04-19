@@ -13,7 +13,7 @@ QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
 ```
 
 - **WebSocket**：必须，用于接收事件和发送 API 调用
-- **HTTP API**：可选但推荐开启，`get_file` 等操作走 HTTP 可避免 WS 的 30 秒超时限制
+- **HTTP API**：可选但推荐开启，便于调试（curl 即可调用）、长程任务不受 WS 超时限制、`get_file` 等操作更稳定
 
 ## 支持的功能
 
