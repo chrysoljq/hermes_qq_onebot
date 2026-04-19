@@ -63,8 +63,9 @@ QQ_ONEBOT_ENABLED=true
 # OneBot HTTP API 地址 (NapCat 默认 5700)
 QQ_ONEBOT_API_URL=http://127.0.0.1:5700
 
-# 适配器监听端口，用于接收 OneBot 推送的事件
-QQ_ONEBOT_LISTEN_PORT=5701
+# 反向 WS 监听端口（adapter 起 server 等 OneBot 连上来）
+QQ_ONEBOT_LISTEN_HOST=0.0.0.0
+QQ_ONEBOT_LISTEN_PORT=6700
 
 # 可选：access_token
 QQ_ONEBOT_ACCESS_TOKEN=
@@ -83,10 +84,16 @@ platforms:
   qq:
     enabled: true
     extra:
-      api_host: "127.0.0.1"
-      api_port: 5700
-      listen_host: "0.0.0.0"
-      listen_port: 5701
+      # OneBot HTTP API 地址（可选，推荐开启）
+      http_api_url: "http://127.0.0.1:5700"
+      # WebSocket 反向模式（推荐，adapter 起 server 等 OneBot 连上来）
+      reverse_mode: true
+      reverse_host: "0.0.0.0"
+      reverse_port: 6700
+      # 正向模式（adapter 主动连 OneBot）
+      # ws_host: "127.0.0.1"
+      # ws_port: 3001
+      # ws_path: "/onebot/v11/ws"
       access_token: ""
       allowed_qq_ids: ""
       allow_all_users: false

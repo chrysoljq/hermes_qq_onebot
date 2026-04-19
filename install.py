@@ -80,7 +80,7 @@ def patch_config_connected(path):
     backup_file(path)
     # Insert after the dingtalk connected check block
     old = '                connected.append(platform)\n        \n        return connected'
-    new = '                connected.append(platform)\n            elif platform == Platform.QQ and config.enabled and config.extra.get("api_port"):\n                connected.append(platform)\n        \n        return connected'
+    new = '                connected.append(platform)\n            elif platform == Platform.QQ and config.enabled:\n                connected.append(platform)\n        \n        return connected'
     if old not in content:
         fail("Cannot find insertion point for QQ connected check in config.py")
         return False
@@ -110,16 +110,15 @@ def patch_config_env_overrides(path):
         config.platforms[Platform.QQ].enabled = True
         qq_extra = config.platforms[Platform.QQ].extra
         if qq_onebot_api:
-            from urllib.parse import urlparse
-            parsed = urlparse(qq_onebot_api)
-            qq_extra["api_host"] = parsed.hostname or "127.0.0.1"
-            qq_extra["api_port"] = parsed.port or 5700
-        qq_extra["listen_host"] = os.getenv("QQ_ONEBOT_LISTEN_HOST", qq_extra.get("listen_host", "127.0.0.1"))
+            # Parse http://host:port — stored as http_api_url for the adapter
+            qq_extra["http_api_url"] = qq_onebot_api
+        # WebSocket reverse mode settings
+        qq_extra["reverse_host"] = os.getenv("QQ_ONEBOT_LISTEN_HOST", qq_extra.get("reverse_host", "0.0.0.0"))
         listen_port = os.getenv("QQ_ONEBOT_LISTEN_PORT", "")
         if listen_port:
-            qq_extra["listen_port"] = int(listen_port)
+            qq_extra["reverse_port"] = int(listen_port)
         else:
-            qq_extra.setdefault("listen_port", 5701)
+            qq_extra.setdefault("reverse_port", 6700)
         qq_extra["access_token"] = os.getenv("QQ_ONEBOT_ACCESS_TOKEN", qq_extra.get("access_token", ""))
         qq_extra["secret"] = os.getenv("QQ_ONEBOT_SECRET", qq_extra.get("secret", ""))
         qq_extra["allowed_qq_ids"] = os.getenv("QQ_ONEBOT_ALLOWED_USERS", qq_extra.get("allowed_qq_ids", ""))
