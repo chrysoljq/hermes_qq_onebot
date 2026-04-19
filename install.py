@@ -327,6 +327,37 @@ def patch_toolsets_py(path):
     ok("Patched toolsets.py")
     return True
 
+def patch_prompt_builder(path):
+    """Add QQ platform context to prompt_builder.py platform_messages dict."""
+    with open(path, "r") as f:
+        content = f.read()
+
+    if '"qq": (' in content and 'OneBot' in content:
+        warn("prompt_builder.py already has QQ context, skipping")
+        return False
+
+    backup_file(path)
+    block = '''    "qq": (
+        "You are on QQ (via OneBot v11 / NapCat). QQ supports text and emoji. "
+        "Do NOT use markdown formatting (no **bold**, no ## headers, no ```code blocks```, "
+        "no [links](url), no lists with -). QQ renders markdown as raw text. "
+        "Use plain text with natural line breaks only. "
+        "You can send media files natively: include MEDIA:/absolute/path/to/file in "
+        "your response. Images are sent as native photos."
+    ),
+'''
+    # Insert before the closing } of the platform_messages dict
+    marker = '# Environment hints'
+    if marker not in content:
+        fail(f"Cannot find '{marker}' marker in prompt_builder.py")
+        return False
+    content = content.replace(marker, block + marker)
+    with open(path, "w") as f:
+        f.write(content)
+    ok("Patched agent/prompt_builder.py (QQ platform context)")
+    return True
+
+
 def patch_init_py(path):
     """Add QQAdapter import to __init__.py."""
     with open(path, "r") as f:
@@ -401,6 +432,7 @@ def do_uninstall(hermes_dir):
         "gateway/config.py",
         "gateway/run.py",
         "gateway/platforms/__init__.py",
+        "agent/prompt_builder.py",
         "hermes_cli/platforms.py",
         "hermes_cli/gateway.py",
         "hermes_cli/status.py",
@@ -448,6 +480,7 @@ def main():
         ("gateway/config.py",      [patch_enum_platform, patch_config_connected, patch_config_env_overrides]),
         ("gateway/run.py",          [patch_run_py]),
         ("gateway/platforms/__init__.py", [patch_init_py]),
+        ("agent/prompt_builder.py", [patch_prompt_builder]),
         ("hermes_cli/platforms.py", [patch_platforms_py]),
         ("hermes_cli/gateway.py",   [patch_gateway_py]),
         ("hermes_cli/status.py",    [patch_status_py]),

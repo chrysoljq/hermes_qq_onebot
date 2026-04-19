@@ -129,6 +129,7 @@ NapCatQQ 需要配置 WebSocket 连接到 hermes-qq-onebot 监听的端口：
 | `gateway/config.py` | `Platform.QQ` 枚举 + 环境变量解析 |
 | `gateway/run.py` | 平台实例化 + 用户权限映射 |
 | `gateway/platforms/__init__.py` | 导入 QQAdapter |
+| `agent/prompt_builder.py` | QQ 平台上下文注入（告诉 agent 不要用 markdown） |
 | `hermes_cli/platforms.py` | setup 向导平台列表 |
 | `hermes_cli/gateway.py` | setup 向导交互配置 |
 | `hermes_cli/status.py` | 状态显示 |
