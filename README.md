@@ -8,9 +8,12 @@ QQ OneBot v11 平台适配器，为 [Hermes Agent](https://github.com/NousResear
 
 ```
 QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
-                  ↓ WebSocket (事件) + HTTP (API)
+                  ↓ WebSocket (事件) + HTTP (API，可选)
              QQ 适配器 (hermes-qq-onebot)
 ```
+
+- **WebSocket**：必须，用于接收事件和发送 API 调用
+- **HTTP API**：可选但推荐开启，`get_file` 等操作走 HTTP 可避免 WS 的 30 秒超时限制
 
 ## 支持的功能
 
@@ -101,7 +104,7 @@ hermes gateway setup
 
 ## NapCat 配置
 
-NapCatQQ 需要配置 WebSocket 连接到 hermes-qq-onebot 监听的端口：
+NapCatQQ 需要配置 WebSocket 连接到 hermes-qq-onebot 监听的端口。HTTP API 可选但推荐开启：
 
 ```json
 {
