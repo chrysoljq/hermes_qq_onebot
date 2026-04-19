@@ -964,11 +964,11 @@ class QQAdapter(BasePlatformAdapter):
             return {"name": name, "type": "private", "chat_id": chat_id}
         return {"name": chat_id, "type": "unknown", "chat_id": chat_id}
 
-    async def send_voice(self, chat_id: str, path: str) -> SendResult:
+    async def send_voice(self, chat_id: str, audio_path: str, caption: Optional[str] = None, reply_to: Optional[str] = None, **kwargs) -> SendResult:
         if not self._ws_client:
             return SendResult(success=False, error="client not ready")
         
-        segments = [_record_segment(path)]
+        segments = [_record_segment(audio_path)]
         try:
             message_type, target_id = self._get_delivery_target(chat_id)
             
