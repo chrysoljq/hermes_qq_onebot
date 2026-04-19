@@ -52,32 +52,9 @@ python3 install.py uninstall
 
 ## 配置
 
-### 方式一：环境变量（推荐）
+### 方式一：config.yaml（推荐）
 
-在 `~/.hermes/.env` 中添加：
-
-```bash
-# 启用 QQ OneBot
-QQ_ONEBOT_ENABLED=true
-
-# OneBot HTTP API 地址 (NapCat 默认 5700)
-QQ_ONEBOT_API_URL=http://127.0.0.1:5700
-
-# 反向 WS 监听端口（adapter 起 server 等 OneBot 连上来）
-QQ_ONEBOT_LISTEN_HOST=0.0.0.0
-QQ_ONEBOT_LISTEN_PORT=6700
-
-# 可选：access_token
-QQ_ONEBOT_ACCESS_TOKEN=
-
-# 可选：允许的 QQ 号（逗号分隔，留空表示全部允许）
-QQ_ONEBOT_ALLOWED_USERS=123456,789012
-
-# 可选：home group ID（定时任务投递目标）
-QQ_ONEBOT_HOME_CHANNEL=123456789
-```
-
-### 方式二：config.yaml
+在 `~/.hermes/config.yaml` 中添加：
 
 ```yaml
 platforms:
@@ -100,6 +77,20 @@ platforms:
     home_channel:
       chat_id: "123456789"
       name: "Home"
+```
+
+### 方式二：环境变量
+
+如需在 `.env` 中配置：
+
+```bash
+QQ_ONEBOT_ENABLED=true
+QQ_ONEBOT_API_URL=http://127.0.0.1:5700
+QQ_ONEBOT_LISTEN_HOST=0.0.0.0
+QQ_ONEBOT_LISTEN_PORT=6700
+QQ_ONEBOT_ACCESS_TOKEN=
+QQ_ONEBOT_ALLOWED_USERS=
+QQ_ONEBOT_HOME_CHANNEL=
 ```
 
 ### 方式三：setup 向导
@@ -148,7 +139,7 @@ NapCatQQ 需要配置 WebSocket 连接到 hermes-qq-onebot 监听的端口。HTT
 ## 兼容性
 
 - hermes-agent 最新 main 分支
-- Python 3.10+
+- Python 3.11+
 - 依赖：`websockets`
 
 ## 许可证
