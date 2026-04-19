@@ -21,7 +21,7 @@ QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
 - @提及检测
 - 图片、语音、文件收发
 - 回复消息
-- emoji 表情回应 (戳一戳)
+- emoji 表情回应（群聊）和戳一戳（私聊）
 - 正向 WebSocket (Hermes → LLBot) + 反向 WebSocket (LLBot → Hermes)
 - 用户白名单 / 全放行模式
 - HTTP API 独立通道 (可与 WS 并用)
