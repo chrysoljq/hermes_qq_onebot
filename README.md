@@ -19,6 +19,7 @@ QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
 
 - 私聊 / 群聊消息收发
 - @提及检测
+- 关键词触发（`mention_patterns`，群聊中匹配关键词即回复，类似 Telegram）
 - 图片、语音、文件收发
 - 回复消息
 - emoji 表情回应（群聊）和戳一戳（私聊）
@@ -75,6 +76,11 @@ platforms:
       access_token: ""
       allowed_qq_ids: ""
       allow_all_users: false
+      # 群聊关键词触发（正则，不区分大小写），匹配到即触发回复（不需要 @）
+      # 支持字符串或列表，也可用环境变量 QQ_MENTION_PATTERNS=芙芙,帮我
+      # mention_patterns:
+      #   - "芙芙"
+      #   - "帮我"
     home_channel:
       chat_id: "123456789"
       name: "Home"
