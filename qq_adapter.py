@@ -448,6 +448,42 @@ class QQAdapter(BasePlatformAdapter):
         self._group_name_cache = _SimpleLRU(max_size=500)
         self._nickname_cache = _SimpleLRU(max_size=5000)
 
+        # Keyword trigger patterns for group chats (like Telegram mention_patterns)
+        self._mention_patterns: List[re.Pattern] = self._compile_mention_patterns(extra)
+
+    def _compile_mention_patterns(self, extra: dict) -> List[re.Pattern]:
+        """Compile regex wake-word patterns for group triggers."""
+        patterns = extra.get("mention_patterns")
+        if patterns is None:
+            raw = os.getenv("QQ_MENTION_PATTERNS", "").strip()
+            if raw:
+                patterns = [p.strip() for p in raw.split(",") if p.strip()]
+            else:
+                return []
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        if not isinstance(patterns, list):
+            logger.warning("[qq] mention_patterns must be a list or string; got %s", type(patterns).__name__)
+            return []
+        compiled = []
+        for p in patterns:
+            if not isinstance(p, str) or not p:
+                continue
+            try:
+                compiled.append(re.compile(p, re.IGNORECASE))
+            except re.error as e:
+                logger.warning("[qq] Invalid mention_pattern %r: %s", p, e)
+        return compiled
+
+    def _text_matches_keywords(self, text: str) -> bool:
+        """Check if text matches any configured keyword pattern."""
+        if not self._mention_patterns or not text:
+            return False
+        for pattern in self._mention_patterns:
+            if pattern.search(text):
+                return True
+        return False
+
     # ── Connection lifecycle ────────────────────────────────────────────
 
     async def connect(self) -> bool:
@@ -601,8 +637,12 @@ class QQAdapter(BasePlatformAdapter):
             return
 
         # @Mention detection in groups (early filter)
-        if message_type == "group" and not _extract_at_qq(message_segments, self._bot_self_id):
-            return
+        if message_type == "group":
+            has_at = _extract_at_qq(message_segments, self._bot_self_id)
+            text_before_at = _build_onebot_text(raw_message, message_segments)
+            has_keyword = self._text_matches_keywords(text_before_at)
+            if not has_at and not has_keyword:
+                return
 
         # Authorization
         if not self._allow_all and user_id not in self._allowed_qq_ids:
