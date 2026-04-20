@@ -930,10 +930,6 @@ class QQAdapter(BasePlatformAdapter):
 
     async def _send_forward(self, chat_id: str, content: str, reply_to: Optional[str] = None) -> Optional[SendResult]:
         """Send long content as a merged forward message. Returns None if forward API fails."""
-        chunks = self._split_text(content)
-        if len(chunks) <= 1:
-            return None  # No need for forward
-        
         delivery = self._delivery_info.get(chat_id, {})
         message_type = delivery.get("message_type", "")
         target_id = delivery.get("target_id", "")
@@ -941,21 +937,20 @@ class QQAdapter(BasePlatformAdapter):
         if not target_id:
             message_type, target_id = self._get_delivery_target(chat_id)
         
-        # Build node list for forward message
+        # Forward message: single node with full content (already collapsed, no need to split)
         nodes = []
         if reply_to:
             nodes.append({"type": "node", "data": {"id": int(reply_to)}})
         
         bot_id = self._bot_self_id or "0"
-        for chunk in chunks:
-            nodes.append({
-                "type": "node",
-                "data": {
-                    "uin": int(bot_id),
-                    "name": "芙芙",
-                    "content": [{"type": "text", "data": {"text": chunk}}],
-                },
-            })
+        nodes.append({
+            "type": "node",
+            "data": {
+                "uin": int(bot_id),
+                "name": "芙芙",
+                "content": [{"type": "text", "data": {"text": content}}],
+            },
+        })
         
         try:
             if message_type == "group":
