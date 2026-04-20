@@ -298,6 +298,16 @@ class _OneBotWSClient:
             "name": file_name or os.path.basename(file_path),
         })
 
+    async def send_forward_msg(self, messages: list) -> dict:
+        """Send a merged/forward message (合并转发)."""
+        return await self.call("send_forward_msg", {"messages": messages})
+
+    async def send_group_forward_msg(self, group_id: str, messages: list) -> dict:
+        return await self.call("send_group_forward_msg", {"group_id": int(group_id), "messages": messages})
+
+    async def send_private_forward_msg(self, user_id: str, messages: list) -> dict:
+        return await self.call("send_private_forward_msg", {"user_id": int(user_id), "messages": messages})
+
     async def set_msg_emoji_like(self, message_id: str, emoji_id: int = 12) -> dict:
         """Send emoji reaction to a message. emoji_id 12 = 👍."""
         return await self.call("set_msg_emoji_like", {"message_id": int(message_id), "emoji_id": emoji_id, "set": True})
@@ -877,6 +887,91 @@ class QQAdapter(BasePlatformAdapter):
 
         return msg_type or "private", str(target_id)
 
+    # ── Forward message helpers ─────────────────────────────────────────
+
+    @staticmethod
+    def _split_text(text: str, max_len: int = 1500) -> List[str]:
+        """Split long text into chunks at paragraph/sentence boundaries."""
+        if len(text) <= max_len:
+            return [text]
+        
+        chunks: List[str] = []
+        remaining = text
+        
+        while len(remaining) > max_len:
+            # Try to split at paragraph boundary first
+            split_pos = remaining.rfind("\n\n", 0, max_len)
+            
+            # Then try single newline
+            if split_pos < max_len * 0.3:
+                split_pos = remaining.rfind("\n", 0, max_len)
+            
+            # Then try CJK sentence boundary
+            if split_pos < max_len * 0.3:
+                for pattern in ("。", "！", "？", "；", ".", "!", "?"):
+                    pos = remaining.rfind(pattern, 0, max_len)
+                    if pos > 0:
+                        split_pos = pos + 1
+                        break
+            
+            # Hard cut at space or any position
+            if split_pos < max_len * 0.3:
+                split_pos = remaining.rfind(" ", 0, max_len)
+                if split_pos < max_len * 0.3:
+                    split_pos = max_len
+            
+            chunks.append(remaining[:split_pos].strip())
+            remaining = remaining[split_pos:].strip()
+        
+        if remaining:
+            chunks.append(remaining)
+        
+        return [c for c in chunks if c]
+
+    async def _send_forward(self, chat_id: str, content: str, reply_to: Optional[str] = None) -> Optional[SendResult]:
+        """Send long content as a merged forward message. Returns None if forward API fails."""
+        chunks = self._split_text(content)
+        if len(chunks) <= 1:
+            return None  # No need for forward
+        
+        delivery = self._delivery_info.get(chat_id, {})
+        message_type = delivery.get("message_type", "")
+        target_id = delivery.get("target_id", "")
+        
+        if not target_id:
+            message_type, target_id = self._get_delivery_target(chat_id)
+        
+        # Build node list for forward message
+        nodes = []
+        if reply_to:
+            nodes.append({"type": "node", "data": {"id": int(reply_to)}})
+        
+        bot_id = self._bot_self_id or "0"
+        for chunk in chunks:
+            nodes.append({
+                "type": "node",
+                "data": {
+                    "uin": int(bot_id),
+                    "name": "芙芙",
+                    "content": [{"type": "text", "data": {"text": chunk}}],
+                },
+            })
+        
+        try:
+            if message_type == "group":
+                result = await self._ws_client.send_group_forward_msg(target_id, nodes)
+            else:
+                result = await self._ws_client.send_private_forward_msg(target_id, nodes)
+            
+            if result.get("status") == "ok" or result.get("retcode", -1) == 0:
+                return SendResult(success=True, message_id=str(result.get("data", {}).get("message_id", "")))
+            # Forward API failed, fall through to return None
+            logger.debug("[qq] Forward send failed (retcode=%s), falling back to split send", result.get("retcode"))
+            return None
+        except Exception as e:
+            logger.debug("[qq] Forward send exception: %s, falling back to split send", e)
+            return None
+
     # ── Send methods ────────────────────────────────────────────────────
 
     async def send(self, chat_id: str, content: str = "", **kwargs) -> SendResult:
@@ -884,6 +979,47 @@ class QQAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="OneBot HTTP client not initialized")
 
         reply_to = kwargs.get("reply_to")
+
+        # For long content: try forward message first (group), then fall back to split
+        if len(content) > MAX_MESSAGE_LENGTH:
+            delivery = self._delivery_info.get(chat_id, {})
+            message_type = delivery.get("message_type", "")
+            if not message_type:
+                message_type, _ = self._get_delivery_target(chat_id)
+
+            # Try forward message for group chats
+            if message_type == "group":
+                forward_result = await self._send_forward(chat_id, content, reply_to)
+                if forward_result:
+                    return forward_result
+
+            # Fall back: send as split messages
+            chunks = self._split_text(content)
+            last_result = None
+            for chunk in chunks:
+                segments = _build_onebot_message(chunk, reply_to=reply_to)
+                if not segments:
+                    continue
+                try:
+                    msg_type, target_id = self._get_delivery_target(chat_id)
+                    if msg_type == "group":
+                        last_result = await self._ws_client.send_group_msg(target_id, segments)
+                    elif msg_type == "private":
+                        last_result = await self._ws_client.send_private_msg(target_id, segments)
+                    else:
+                        last_result = await self._ws_client.send_msg("private", target_id, segments)
+                except Exception as e:
+                    logger.error("[qq] Split send failed: %s", e)
+                    return SendResult(success=False, error=str(e))
+                # Only the first chunk carries reply_to
+                reply_to = None
+
+            if last_result and last_result.get("retcode", 0) == 0:
+                return SendResult(success=True, message_id=str(last_result.get("data", {}).get("message_id", "")))
+            error_msg = (last_result or {}).get("wording", (last_result or {}).get("msg", "unknown error"))
+            return SendResult(success=False, error=f"OneBot API error: {error_msg}")
+
+        # Normal path: message within limits
         segments = _build_onebot_message(content, reply_to=reply_to)
 
         # 避免给 QQ 发送完全为空的消息数组
