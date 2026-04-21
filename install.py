@@ -345,12 +345,19 @@ def patch_prompt_builder(path):
         "your response. Images are sent as native photos."
     ),
 '''
-    # Insert before the closing } of the platform_messages dict
-    marker = '# Environment hints'
-    if marker not in content:
-        fail(f"Cannot find '{marker}' marker in prompt_builder.py")
+    # Insert before the closing } of the PLATFORM_HINTS dict
+    # Find the dict's closing brace — it's the first '}' after 'PLATFORM_HINTS = {'
+    hints_start = content.find('PLATFORM_HINTS = {')
+    if hints_start == -1:
+        fail("Cannot find 'PLATFORM_HINTS = {' in prompt_builder.py")
         return False
-    content = content.replace(marker, block + marker)
+    closing = content.find('\n}', hints_start)
+    if closing == -1:
+        fail("Cannot find closing '}' of PLATFORM_HINTS dict")
+        return False
+    # Insert block right before the closing brace
+    insert_pos = closing + 1  # position of the '\n' before '}'
+    content = content[:insert_pos] + block + content[insert_pos:]
     with open(path, "w") as f:
         f.write(content)
     ok("Patched agent/prompt_builder.py (QQ platform context)")
