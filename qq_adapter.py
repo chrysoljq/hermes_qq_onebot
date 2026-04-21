@@ -29,6 +29,7 @@ Configuration in config.yaml:
           access_token: ""
           allowed_qq_ids: ""
           allow_all_users: false
+          show_qq_id: false         # 在 user_name 里附带 QQ 号，如 风之遗迹(123456)
 
 Environment variables:
     QQ_ACCESS_TOKEN     - OneBot access_token
@@ -448,6 +449,9 @@ class QQAdapter(BasePlatformAdapter):
         self._group_name_cache = _SimpleLRU(max_size=500)
         self._nickname_cache = _SimpleLRU(max_size=5000)
 
+        # Show QQ ID in user_name
+        self._show_qq_id: bool = extra.get("show_qq_id", False)
+
         # Keyword trigger patterns for group chats (like Telegram mention_patterns)
         self._mention_patterns: List[re.Pattern] = self._compile_mention_patterns(extra)
 
@@ -652,6 +656,9 @@ class QQAdapter(BasePlatformAdapter):
         if nickname:
             self._nickname_cache.set(user_id, nickname)
 
+        # Optionally append QQ ID to nickname for LLM visibility
+        display_name = f"{nickname}({user_id})" if self._show_qq_id and nickname != user_id else nickname
+
         # Resolve Chat Info
         if message_type == "group":
             chat_id = f"qq_group_{group_id}"
@@ -665,7 +672,7 @@ class QQAdapter(BasePlatformAdapter):
             chat_name = nickname or f"QQ用户{user_id}"
 
         source = self.build_source(
-            chat_id=chat_id, chat_name=chat_name, user_id=user_id, user_name=nickname,
+            chat_id=chat_id, chat_name=chat_name, user_id=user_id, user_name=display_name,
             chat_type="group" if message_type == "group" else "dm",
             thread_id=group_id if message_type == "group" else None,
         )
