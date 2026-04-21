@@ -29,7 +29,7 @@ Configuration in config.yaml:
           access_token: ""
           allowed_qq_ids: ""
           allow_all_users: false
-          show_qq_id: false         # 在 user_name 里附带 QQ 号，如 风之遗迹(123456)
+          show_qq_id: false         # 在 user_name 里附带 QQ 号，如 用户名(123456)
 
 Environment variables:
     QQ_ACCESS_TOKEN     - OneBot access_token
