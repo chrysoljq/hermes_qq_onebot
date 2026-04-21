@@ -1,4 +1,4 @@
-# hermes-qq-onebot
+# hermes_qq_onebot
 
 QQ OneBot v11 平台适配器，为 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 添加 QQ 支持。
 
@@ -9,7 +9,7 @@ QQ OneBot v11 平台适配器，为 [Hermes Agent](https://github.com/NousResear
 ```
 QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
                   ↓ WebSocket (事件) + HTTP (API，可选)
-             QQ 适配器 (hermes-qq-onebot)
+             QQ 适配器 (hermes_qq_onebot)
 ```
 
 - **WebSocket**：必须，用于接收事件和发送 API 调用
@@ -32,8 +32,8 @@ QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
 ## 安装
 
 ```bash
-git clone https://github.com/chrysoljq/hermes-qq-onebot.git
-cd hermes-qq-onebot
+git clone https://github.com/chrysoljq/hermes_qq_onebot.git
+cd hermes_qq_onebot
 chmod +x install.sh
 ./install.sh
 ```
@@ -109,7 +109,7 @@ hermes gateway setup
 
 ## NapCat 配置
 
-NapCatQQ 需要配置 WebSocket 连接到 hermes-qq-onebot 监听的端口。HTTP API 可选但推荐开启：
+NapCatQQ 需要配置 WebSocket 连接到 hermes_qq_onebot 监听的端口。HTTP API 可选但推荐开启：
 
 ```json
 {
