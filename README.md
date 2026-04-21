@@ -32,7 +32,7 @@ QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
 ## 安装
 
 ```bash
-git clone https://github.com/yourname/hermes-qq-onebot.git
+git clone https://github.com/chrysoljq/hermes-qq-onebot.git
 cd hermes-qq-onebot
 chmod +x install.sh
 ./install.sh
