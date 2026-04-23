@@ -25,7 +25,7 @@ QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
 - emoji 表情回应（群聊）和戳一戳（私聊）
 - 长消息自动拆分 + 合并转发（群聊，避免刷屏）
 - 正向 WebSocket (Hermes → LLBot) + 反向 WebSocket (LLBot → Hermes)
-- 用户白名单 / 全放行模式
+- 用户授权（通过网关层 `QQ_ONEBOT_ALLOWED_USERS` 环境变量统一管理）
 - HTTP API 独立通道 (可与 WS 并用)
 - 消息去重
 
@@ -74,8 +74,6 @@ platforms:
       # ws_port: 3001
       # ws_path: "/onebot/v11/ws"
       access_token: ""
-      allowed_qq_ids: ""
-      allow_all_users: false
       show_qq_id: false         # 在 user_name 里附带 QQ 号，如 用户名(123456)
       # 群聊关键词触发（正则，不区分大小写），匹配到即触发回复（不需要 @）
       # 支持字符串或列表，也可用环境变量 QQ_MENTION_PATTERNS=芙芙,帮我
@@ -97,7 +95,7 @@ QQ_ONEBOT_API_URL=http://127.0.0.1:5700
 QQ_ONEBOT_LISTEN_HOST=0.0.0.0
 QQ_ONEBOT_LISTEN_PORT=6700
 QQ_ONEBOT_ACCESS_TOKEN=
-QQ_ONEBOT_ALLOWED_USERS=
+QQ_ONEBOT_ALLOWED_USERS=your_qq_id,another_qq_id
 QQ_ONEBOT_HOME_CHANNEL=
 ```
 

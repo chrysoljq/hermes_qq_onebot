@@ -27,16 +27,12 @@ Configuration in config.yaml:
           reverse_host: "0.0.0.0"
           reverse_port: 6700
           access_token: ""
-          allowed_qq_ids: ""
-          allow_all_users: false
           show_qq_id: false         # 在 user_name 里附带 QQ 号，如 用户名(123456)
 
 Environment variables:
     QQ_ACCESS_TOKEN     - OneBot access_token
     QQ_WS_URL           - Full WebSocket URL (overrides ws_host/port/path)
     QQ_REVERSE_MODE     - Set to "true" for reverse WS mode
-    QQ_ALLOWED_USERS    - Comma-separated allowed QQ user IDs
-    QQ_ALLOW_ALL_USERS  - Set to "true" to allow all users
     QQ_HOME_CHANNEL     - Default chat_id for sending (user_id or group_id)
 """
 
@@ -430,15 +426,6 @@ class QQAdapter(BasePlatformAdapter):
         self._bot_self_id: str = extra.get("bot_self_id", "") or os.getenv("QQ_BOT_SELF_ID", "")
         self._http_api_url: str = extra.get("http_api_url", "") or os.getenv("QQ_HTTP_API_URL", "")
 
-        # Allowed users
-        self._allowed_qq_ids: set = set()
-        allowed_str = extra.get("allowed_qq_ids", "") or os.getenv("QQ_ALLOWED_USERS", "")
-        if allowed_str:
-            self._allowed_qq_ids = {s.strip() for s in allowed_str.split(",") if s.strip()}
-        self._allow_all: bool = (
-            extra.get("allow_all_users", False)
-            or os.getenv("QQ_ALLOW_ALL_USERS", "").lower() == "true"
-        )
 
         # Internal state
         self._ws: Optional[ClientConnection] = None
@@ -660,10 +647,6 @@ class QQAdapter(BasePlatformAdapter):
             if not has_at and not has_keyword:
                 return
 
-        # Authorization
-        if not self._allow_all and user_id not in self._allowed_qq_ids:
-            logger.debug("[qq] Unauthorized user %s — ignoring", user_id)
-            return
 
         if nickname:
             self._nickname_cache.set(user_id, nickname)
