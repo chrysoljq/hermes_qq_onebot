@@ -71,6 +71,14 @@ from gateway.platforms.helpers import MessageDeduplicator
 logger = logging.getLogger(__name__)
 
 
+# Module-level WS client reference for external access (e.g. send_message tool)
+_global_ws_client: Optional["_OneBotWSClient"] = None
+
+def get_ws_client() -> Optional["_OneBotWSClient"]:
+    """Get the global OneBot WS client instance, if connected."""
+    return _global_ws_client
+
+
 def check_qq_requirements() -> bool:
     """Check if OneBot QQ runtime dependencies are available."""
     try:
@@ -349,6 +357,8 @@ class _OneBotWSServer:
             logger.info("[qq] Reverse WS client connected: %s", ws.remote_address)
             self._client_ws = ws
             self._ws_client.set_ws(ws)
+            global _global_ws_client
+            _global_ws_client = self._ws_client
 
             try:
                 async for message in ws:
@@ -563,6 +573,8 @@ class QQAdapter(BasePlatformAdapter):
                 ) as ws:
                     self._ws = ws
                     self._ws_client.set_ws(ws)
+                    global _global_ws_client
+                    _global_ws_client = self._ws_client
                     self._reconnect_delay = 1.0
                     logger.info("[qq] WebSocket connected to %s", self._ws_url)
                     

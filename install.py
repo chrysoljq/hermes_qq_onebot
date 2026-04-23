@@ -326,6 +326,74 @@ def patch_toolsets_py(path):
     ok("Patched toolsets.py")
     return True
 
+
+def patch_send_message_tool(path):
+    """Add QQ OneBot media sending support to send_message_tool.py."""
+    with open(path, "r") as f:
+        content = f.read()
+
+    if "_send_qq_onebot_with_media" in content:
+        warn("send_message_tool.py already has QQ OneBot media support, skipping")
+        return False
+
+    backup_file(path)
+    changed = False
+
+    # 1. Add QQ dispatch block before "# --- Non-Telegram/Discord platforms ---"
+    marker1 = "    # --- Non-Telegram/Discord platforms ---"
+    if marker1 in content:
+        qq_block = (
+            "    # --- QQ: special handling for media attachments (like Telegram/Discord) ---\n"
+            "    if platform == Platform.QQ:\n"
+            "        last_result = None\n"
+            "        for i, chunk in enumerate(chunks):\n"
+            "            is_last = (i == len(chunks) - 1)\n"
+            "            result = await _send_qq_onebot_with_media(\n"
+            "                pconfig.extra, chat_id, chunk,\n"
+            "                media_files=media_files if is_last else [],\n"
+            "            )\n"
+            "            if isinstance(result, dict) and result.get(\"error\"):\n"
+            "                return result\n"
+            "            last_result = result\n"
+            "        return last_result\n"
+            "\n"
+        )
+        content = content.replace(marker1, qq_block + marker1, 1)
+        changed = True
+
+    # 2. Add QQ elif case after QQBOT in the dispatch chain
+    marker2 = "            result = await _send_qqbot(pconfig, chat_id, chunk)"
+    qq_elif = (
+        "\n"
+        "        elif platform == Platform.QQ:\n"
+        "            result = await _send_qq_onebot_with_media(pconfig.extra, chat_id, chunk, media_files=media_files if is_last else [])"
+    )
+    if marker2 in content and "Platform.QQ" not in content.split(marker2)[1][:200]:
+        content = content.replace(marker2, marker2 + qq_elif, 1)
+        changed = True
+
+    # 3. Add _send_qq_onebot_with_media function after _send_qq_onebot or _send_qqbot
+    func_def = '\n\nasync def _send_qq_onebot_with_media(extra, chat_id, message, media_files=None):\n    """Send via QQ OneBot v11, prefer WS, fallback to HTTP API."""\n    media_files = media_files or []\n    segments = []\n    if message.strip():\n        segments.append({"type": "text", "data": {"text": message[:4000]}})\n    for media_path, is_voice in media_files:\n        if not os.path.exists(media_path):\n            logger.warning(f"Media file not found: {media_path}")\n            continue\n        ext = os.path.splitext(media_path)[1].lower()\n        if ext in _IMAGE_EXTS:\n            segments.append({"type": "image", "data": {"file": f"file:///{media_path}"}})\n        elif ext in _AUDIO_EXTS:\n            segments.append({"type": "record", "data": {"file": f"file:///{media_path}"}})\n        else:\n            segments.append({"type": "file", "data": {"file": media_path}})\n    if not segments:\n        return _error("No valid message content to send")\n    if str(chat_id).startswith("group:"):\n        msg_type, target_id = "group", chat_id.split(":", 1)[1]\n    elif str(chat_id).startswith("user:"):\n        msg_type, target_id = "private", chat_id.split(":", 1)[1]\n    else:\n        msg_type, target_id = "group", str(chat_id)\n    try:\n        from gateway.platforms.qq import get_ws_client\n        ws_client = get_ws_client()\n        if ws_client and ws_client._ws:\n            logger.info("[qq] Sending via WS to %s %s", msg_type, target_id)\n            if msg_type == "group":\n                result = await ws_client.send_group_msg(target_id, segments)\n            else:\n                result = await ws_client.send_private_msg(target_id, segments)\n            if result.get("status") == "ok":\n                return {"success": True, "platform": "qq", "chat_id": chat_id,\n                        "message_id": result.get("data", {}).get("message_id")}\n            logger.warning("[qq] WS send failed (%s), trying HTTP fallback", result.get("msg"))\n    except Exception as e:\n        logger.warning("[qq] WS send error: %s, trying HTTP fallback", e)\n    logger.info("[qq] WS unavailable, falling back to HTTP API")\n    try:\n        import httpx\n    except ImportError:\n        return _error("QQ OneBot WS unavailable and httpx not installed for HTTP fallback")\n    http_api_url = extra.get("http_api_url", "") or os.getenv("QQ_HTTP_API_URL", "")\n    if not http_api_url:\n        api_host = extra.get("api_host", "")\n        api_port = extra.get("api_port", "")\n        if not api_host or not api_port:\n            ws_host = extra.get("ws_host", "127.0.0.1")\n            ws_port = int(extra.get("ws_port", 3001))\n            api_host = ws_host\n            api_port = ws_port - 1\n        http_api_url = f"http://{api_host}:{api_port}"\n    access_token = extra.get("access_token", "") or os.getenv("QQ_ONEBOT_ACCESS_TOKEN", "")\n    try:\n        async with httpx.AsyncClient(timeout=15) as client:\n            headers = {}\n            if access_token:\n                headers["Authorization"] = f"Bearer {access_token}"\n            url = f"{http_api_url}/send_msg"\n            payload = {"message": segments}\n            if str(chat_id).startswith("group:"):\n                payload["group_id"] = int(chat_id.split(":", 1)[1])\n            elif str(chat_id).startswith("user:"):\n                payload["user_id"] = int(chat_id.split(":", 1)[1])\n            else:\n                payload["group_id"] = int(chat_id)\n            resp = await client.post(url, json=payload, headers=headers)\n            if resp.status_code == 200:\n                data = resp.json()\n                if data.get("status") == "ok":\n                    return {"success": True, "platform": "qq", "chat_id": chat_id,\n                            "message_id": data.get("data", {}).get("message_id")}\n                else:\n                    return _error(f"QQ OneBot API error: {data.get(\'msg\', \'unknown\')}")\n            else:\n                return _error(f"QQ OneBot send failed: HTTP {resp.status_code}")\n    except Exception as e:\n        return _error(f"QQ OneBot send failed: {e}")\n'
+    anchor = None
+    for candidate in ["async def _send_qq_onebot(", "async def _send_qqbot("]:
+        idx = content.find(candidate)
+        if idx != -1:
+            next_func = content.find("\nasync def ", idx + 1)
+            if next_func != -1:
+                anchor = next_func
+                break
+    if anchor is not None:
+        content = content[:anchor] + func_def + content[anchor:]
+        changed = True
+    else:
+        fail("Cannot find _send_qq_onebot or _send_qqbot to anchor media function")
+
+    if changed:
+        with open(path, "w") as f:
+            f.write(content)
+        ok("Patched tools/send_message_tool.py (QQ OneBot media support)")
+    return changed
+
 def patch_prompt_builder(path):
     """Add QQ platform context to prompt_builder.py platform_messages dict."""
     with open(path, "r") as f:
@@ -443,6 +511,7 @@ def do_uninstall(hermes_dir):
         "hermes_cli/gateway.py",
         "hermes_cli/status.py",
         "toolsets.py",
+        "tools/send_message_tool.py",
     ]:
         path = os.path.join(hermes_dir, fname)
         bak = path + ".bak"
@@ -491,6 +560,7 @@ def main():
         ("hermes_cli/gateway.py",   [patch_gateway_py]),
         ("hermes_cli/status.py",    [patch_status_py]),
         ("toolsets.py",             [patch_toolsets_py]),
+        ("tools/send_message_tool.py", [patch_send_message_tool]),
     ]
 
     for relpath, patch_fns in patches:
