@@ -33,6 +33,7 @@ Environment variables:
     QQ_ACCESS_TOKEN     - OneBot access_token
     QQ_WS_URL           - Full WebSocket URL (overrides ws_host/port/path)
     QQ_REVERSE_MODE     - Set to "true" for reverse WS mode
+
     QQ_HOME_CHANNEL     - Default chat_id for sending (user_id or group_id)
 """
 
@@ -65,7 +66,6 @@ from gateway.platforms.base import (
 from gateway.platforms.helpers import MessageDeduplicator
 
 logger = logging.getLogger(__name__)
-
 
 # Module-level WS client reference for external access (e.g. send_message tool)
 _global_ws_client: Optional["_OneBotWSClient"] = None
@@ -452,6 +452,12 @@ class QQAdapter(BasePlatformAdapter):
         # Keyword trigger patterns for group chats (like Telegram mention_patterns)
         self._mention_patterns: List[re.Pattern] = self._compile_mention_patterns(extra)
 
+        # User allowlist — if set, only these QQ IDs trigger reactions & processing
+        raw_allow = extra.get("allowed_qq_ids", "") or os.getenv("QQ_ONEBOT_ALLOWED_USERS", "")
+        self._allow_from: frozenset[str] = frozenset(
+            p.strip() for p in str(raw_allow).split(",") if p.strip()
+        )
+
     def _compile_mention_patterns(self, extra: dict) -> List[re.Pattern]:
         """Compile regex wake-word patterns for group triggers."""
         patterns = extra.get("mention_patterns")
@@ -484,6 +490,12 @@ class QQAdapter(BasePlatformAdapter):
             if pattern.search(text):
                 return True
         return False
+
+    def _is_user_allowed(self, user_id: str) -> bool:
+        """Check whether a QQ user is in the allowlist. Empty list = allow all."""
+        if not self._allow_from:
+            return True
+        return user_id in self._allow_from
 
     # ── Connection lifecycle ────────────────────────────────────────────
 
@@ -637,6 +649,10 @@ class QQAdapter(BasePlatformAdapter):
 
         # Self-messages filter
         if user_id == self._bot_self_id:
+            return
+
+        # User allowlist filter (skip all processing for non-allowed users)
+        if not self._is_user_allowed(user_id):
             return
 
         # @Mention detection in groups (early filter)
@@ -1074,7 +1090,7 @@ class QQAdapter(BasePlatformAdapter):
                 result = await self._ws_client.send_msg("private", target_id, segments)
 
             if result.get("status") == "failed" or result.get("retcode", 0) != 0:
-                error_msg = result.get("wording", result.get("msg", "unknown error"))
+                error_msg = result.get("wording") or result.get("message") or result.get("msg") or "unknown error"
                 return SendResult(success=False, error=f"OneBot API error: {error_msg}")
 
             return SendResult(success=True, message_id=str(result.get("data", {}).get("message_id", "")))
@@ -1104,22 +1120,62 @@ class QQAdapter(BasePlatformAdapter):
             return SendResult(success=False, error=str(e))
 
     async def send_image_file(self, chat_id: str, image_path: str, caption: str = "", **kwargs) -> SendResult:
-        """Send a local image file natively via QQ."""
+        """Send a local image file natively via QQ.
+
+        Uses HTTP API when available (LLBot reverse WS never returns echo
+        for image messages, causing 60s timeouts).  Falls back to WS otherwise.
+        """
+        # Send caption text first if present
+        if caption.strip():
+            try:
+                await self.send(chat_id, caption)
+            except Exception:
+                pass
+
+        segments = [_image_segment(image_path)]
+        message_type, target_id = self._get_delivery_target(chat_id)
+
+        # Prefer HTTP API for images — reverse WS never returns echo for them
+        if self._http_api_url:
+            try:
+                params = {
+                    "group_id" if message_type == "group" else "user_id": int(target_id),
+                    "message": segments,
+                }
+                result = await self._http_call("send_group_msg" if message_type == "group" else "send_private_msg", params)
+                retcode = result.get("retcode", -1)
+                # retcode 0 = success; retcode 200 = invoke timeout but image was actually sent
+                if retcode in (0, 200):
+                    if retcode == 200:
+                        logger.info("[QQ] Image send got retcode=200 (invoke timeout) — image was likely delivered")
+                    return SendResult(success=True)
+                error_msg = result.get("message", "") or result.get("wording", "") or result.get("msg", "") or f"retcode={retcode}"
+                return SendResult(success=False, error=error_msg)
+            except Exception as e:
+                logger.warning("[QQ] HTTP image send failed, falling back to WS: %s", e)
+
+        # Fallback: WS path (may timeout for images, but try anyway)
         if not self._ws_client:
             return SendResult(success=False, error="OneBot client not initialized")
 
-        segments = []
-        if caption.strip():
-            segments.append(_text_segment(caption))
-        segments.append(_image_segment(image_path))
-
         try:
-            message_type, target_id = self._get_delivery_target(chat_id)
             if message_type == "group":
                 result = await self._ws_client.send_group_msg(target_id, segments)
             else:
                 result = await self._ws_client.send_private_msg(target_id, segments)
-            return SendResult(success=result.get("retcode", 0) == 0)
+            # Check for API-level failure (no retcode in timeout/error responses)
+            if result.get("status") == "failed":
+                msg = result.get("msg", "unknown error")
+                # WS image sends often timeout even though the image was delivered
+                if "timeout" in msg.lower():
+                    logger.info("[QQ] WS image send timed out — image was likely delivered anyway")
+                    return SendResult(success=True)
+                return SendResult(success=False, error=msg)
+            retcode = result.get("retcode", 0)
+            if retcode == 0:
+                return SendResult(success=True)
+            error_msg = result.get("msg", "") or result.get("wording", "") or f"retcode={retcode}"
+            return SendResult(success=False, error=error_msg)
         except Exception as e:
             return SendResult(success=False, error=str(e))
 

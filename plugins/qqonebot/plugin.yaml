@@ -1,0 +1,10 @@
+name: qqonebot
+kind: platform
+version: 1.0.0
+description: >
+  QQ OneBot (Lagrange/LLOneBot/NapCat) gateway adapter for Hermes Agent.
+  Connects to QQ via OneBot v11 WebSocket protocol and relays messages
+  between QQ and the Hermes agent.
+author: iqach
+requires_env:
+  - QQ_ONEBOT_WS_URL

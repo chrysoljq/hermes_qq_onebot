@@ -1,4 +1,5 @@
 #!/bin/bash
-# hermes-qq-onebot installer wrapper
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec python3 "$SCRIPT_DIR/install.py" "$@"
+# Install hermes-qq-onebot as a plugin
+set -e
+cd "$(dirname "$0")"
+python3 install.py

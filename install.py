@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-hermes-qq-onebot installer
-Patches hermes-agent to add QQ OneBot v11 platform support.
+hermes-qq-onebot installer (plugin mode)
+Installs QQ OneBot v11 platform adapter as a Hermes plugin.
 """
 
 import os
 import sys
-import re
 import shutil
 import subprocess
 from pathlib import Path
 
-HERMES_DIR = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes/hermes-agent"))
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes")))
+HERMES_AGENT = HERMES_HOME / "hermes-agent"
+PLUGINS_DIR = HERMES_HOME / "plugins"
 SCRIPT_DIR = Path(__file__).parent
-PATCHES_DIR = SCRIPT_DIR / "patches"
 
 # Colors
 GREEN = "\033[92m"
@@ -28,564 +28,186 @@ def ok(msg):   print(f"{GREEN}✔{RESET} {msg}")
 def warn(msg): print(f"{YELLOW}⚠{RESET} {msg}")
 def fail(msg): print(f"{RED}✘{RESET} {msg}")
 
-def find_hermes_dir():
-    """Auto-detect hermes-agent installation."""
-    candidates = [
-        os.environ.get("HERMES_HOME"),
-        os.path.expanduser("~/.hermes/hermes-agent"),
-        os.path.expanduser("~/hermes-agent"),
-    ]
-    for d in candidates:
-        if d and os.path.isdir(d) and os.path.isfile(os.path.join(d, "run_agent.py")):
-            return d
-    return None
-
-def backup_file(path):
-    """Create .bak backup before patching."""
-    bak = path + ".bak"
-    if not os.path.exists(bak):
-        shutil.copy2(path, bak)
-        info(f"Backed up: {os.path.basename(path)}")
-    else:
-        info(f"Backup exists: {os.path.basename(path)}.bak")
-
-def patch_enum_platform(path):
-    """Add Platform.QQ enum value after Platform.QQBOT."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if "QQ = \"qq\"" in content:
-        warn("Platform.QQ already exists in config.py, skipping enum patch")
+def check_hermes():
+    """Check if hermes-agent is installed."""
+    if not HERMES_AGENT.is_dir():
+        fail(f"Hermes agent not found at {HERMES_AGENT}")
+        fail("Please install hermes-agent first: https://github.com/NousResearch/hermes-agent")
         return False
-
-    backup_file(path)
-    content = content.replace(
-        '    QQBOT = "qqbot"',
-        '    QQBOT = "qqbot"\n    QQ = "qq"'
-    )
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched Platform enum")
+    if not (HERMES_AGENT / "run_agent.py").is_file():
+        fail(f"Invalid hermes-agent installation at {HERMES_AGENT}")
+        return False
     return True
 
-def patch_config_connected(path):
-    """Add QQ to get_connected_platforms validation."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if 'platform == Platform.QQ and config.enabled' in content:
-        warn("QQ connected-platform check already exists, skipping")
-        return False
-
-    backup_file(path)
-    # Insert after the dingtalk connected check block
-    old = '                connected.append(platform)\n        \n        return connected'
-    new = '                connected.append(platform)\n            elif platform == Platform.QQ and config.enabled:\n                connected.append(platform)\n        \n        return connected'
-    if old not in content:
-        fail("Cannot find insertion point for QQ connected check in config.py")
-        return False
-    content = content.replace(old, new, 1)
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched get_connected_platforms")
-    return True
-
-def patch_config_env_overrides(path):
-    """Add QQ OneBot env override block."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if "qq_onebot_enabled" in content:
-        warn("QQ OneBot env overrides already exist, skipping")
-        return False
-
-    backup_file(path)
-    block = '''
-    # QQ OneBot v11 (NapCat/go-cqhttp/Lagrange)
-    qq_onebot_enabled = os.getenv("QQ_ONEBOT_ENABLED", "").lower() in ("true", "1", "yes")
-    qq_onebot_api = os.getenv("QQ_ONEBOT_API_URL", "").strip()
-    if qq_onebot_enabled or qq_onebot_api:
-        if Platform.QQ not in config.platforms:
-            config.platforms[Platform.QQ] = PlatformConfig()
-        config.platforms[Platform.QQ].enabled = True
-        qq_extra = config.platforms[Platform.QQ].extra
-        if qq_onebot_api:
-            # Parse http://host:port — stored as http_api_url for the adapter
-            qq_extra["http_api_url"] = qq_onebot_api
-        # WebSocket reverse mode settings
-        qq_extra["reverse_host"] = os.getenv("QQ_ONEBOT_LISTEN_HOST", qq_extra.get("reverse_host", "0.0.0.0"))
-        listen_port = os.getenv("QQ_ONEBOT_LISTEN_PORT", "")
-        if listen_port:
-            qq_extra["reverse_port"] = int(listen_port)
-        else:
-            qq_extra.setdefault("reverse_port", 6700)
-        qq_extra["access_token"] = os.getenv("QQ_ONEBOT_ACCESS_TOKEN", qq_extra.get("access_token", ""))
-        qq_extra["secret"] = os.getenv("QQ_ONEBOT_SECRET", qq_extra.get("secret", ""))
-        qq_extra["allowed_qq_ids"] = os.getenv("QQ_ONEBOT_ALLOWED_USERS", qq_extra.get("allowed_qq_ids", ""))
-        qq_extra["allow_all_users"] = os.getenv("QQ_ONEBOT_ALLOW_ALL", "").lower() in ("true", "1", "yes") or qq_extra.get("allow_all_users", False)
-        qq_home = os.getenv("QQ_ONEBOT_HOME_CHANNEL", "").strip()
-        if qq_home:
-            config.platforms[Platform.QQ].home_channel = HomeChannel(
-                platform=Platform.QQ,
-                chat_id=qq_home,
-                name=os.getenv("QQ_ONEBOT_HOME_CHANNEL_NAME", "Home"),
-            )
-'''
-    # Insert before session settings comment
-    marker = '    # Session settings'
-    if marker not in content:
-        fail("Cannot find '# Session settings' marker in config.py")
-        return False
-    content = content.replace(marker, block + marker)
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched env overrides for QQ OneBot")
-    return True
-
-def patch_run_py(path):
-    """Patch gateway/run.py with QQ OneBot adapter instantiation."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if "from gateway.platforms.qq import QQAdapter as QQOneBotAdapter" in content:
-        warn("run.py already patched for QQ, skipping")
-        return False
-
-    backup_file(path)
-
-    # 1. Add QQ_ONEBOT_ALLOWED_USERS to the allowlist env vars
-    content = content.replace(
-        '                       "QQ_ALLOWED_USERS",\n                       "GATEWAY_ALLOWED_USERS")',
-        '                       "QQ_ALLOWED_USERS",\n                       "QQ_ONEBOT_ALLOWED_USERS",\n                       "GATEWAY_ALLOWED_USERS")'
-    )
-
-    # 2. Add QQ_ONEBOT_ALLOW_ALL
-    content = content.replace(
-        '                       "QQ_ALLOW_ALL_USERS")',
-        '                       "QQ_ALLOW_ALL_USERS",\n                       "QQ_ONEBOT_ALLOW_ALL")'
-    )
-
-    # 3. Add QQ adapter instantiation after QQBot block
-    old = """            return QQAdapter(config)
-
-        return None"""
-    new = """            return QQAdapter(config)
-
-        elif platform == Platform.QQ:
-            from gateway.platforms.qq import QQAdapter as QQOneBotAdapter, check_qq_requirements as check_qq_ob_requirements
-            if not check_qq_ob_requirements():
-                logger.warning("QQ OneBot: websockets not installed")
-                return None
-            return QQOneBotAdapter(config)
-
-        return None"""
-    if old not in content:
-        fail("Cannot find QQBot adapter block in run.py")
-        return False
-    content = content.replace(old, new, 1)
-
-    # 4. Add Platform.QQ to user env map
-    content = content.replace(
-        '            Platform.QQBOT: "QQ_ALLOWED_USERS",',
-        '            Platform.QQBOT: "QQ_ALLOWED_USERS",\n            Platform.QQ: "QQ_ONEBOT_ALLOWED_USERS",'
-    )
-
-    # 5. Add Platform.QQ to allow-all env map
-    content = content.replace(
-        '            Platform.QQBOT: "QQ_ALLOW_ALL_USERS",',
-        '            Platform.QQBOT: "QQ_ALLOW_ALL_USERS",\n            Platform.QQ: "QQ_ONEBOT_ALLOW_ALL",'
-    )
-
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched gateway/run.py")
-    return True
-
-def patch_platforms_py(path):
-    """Add QQ to CLI platforms list."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if '"qq"' in content and 'OneBot' in content:
-        warn("hermes_cli/platforms.py already has QQ, skipping")
-        return False
-
-    backup_file(path)
-    content = content.replace(
-        '    ("qqbot",          PlatformInfo(label="💬 QQBot",           default_toolset="hermes-qqbot")),',
-        '    ("qqbot",          PlatformInfo(label="💬 QQBot",           default_toolset="hermes-qqbot")),\n    ("qq",             PlatformInfo(label="💬 QQ (OneBot)",     default_toolset="hermes-qq")),'
-    )
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched hermes_cli/platforms.py")
-    return True
-
-def patch_gateway_py(path):
-    """Add QQ OneBot setup wizard config."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if '"qq"' in content and 'OneBot' in content:
-        warn("hermes_cli/gateway.py already has QQ setup, skipping")
-        return False
-
-    backup_file(path)
-    block = '''    {
-        "key": "qq",
-        "label": "QQ (OneBot v11)",
-        "emoji": "💬",
-        "token_var": "QQ_ONEBOT_API_URL",
-        "setup_instructions": [
-            "1. Install a OneBot v11 implementation (NapCatQQ recommended)",
-            "2. Start the OneBot implementation — it listens on port 5700 by default",
-            "3. Configure the OneBot implementation to send events to port 5701",
-        ],
-        "vars": [
-            {"name": "QQ_ONEBOT_ENABLED", "prompt": "Enable QQ OneBot adapter? (yes/no)", "password": False},
-            {"name": "QQ_ONEBOT_API_URL", "prompt": "OneBot HTTP API URL (e.g., http://127.0.0.1:5700)", "password": False,
-             "help": "URL of your NapCat/go-cqhttp HTTP API endpoint."},
-            {"name": "QQ_ONEBOT_LISTEN_PORT", "prompt": "Adapter listen port for events (default 5701)", "password": False},
-            {"name": "QQ_ONEBOT_ACCESS_TOKEN", "prompt": "OneBot access_token (or empty)", "password": True,
-             "help": "Optional Bearer token for OneBot API authentication."},
-            {"name": "QQ_ONEBOT_SECRET", "prompt": "OneBot event secret for HMAC (or empty)", "password": True},
-            {"name": "QQ_ONEBOT_ALLOWED_USERS", "prompt": "Allowed QQ IDs (comma-separated, or empty for all)", "password": False,
-             "is_allowlist": True},
-            {"name": "QQ_ONEBOT_HOME_CHANNEL", "prompt": "Home group ID for cron delivery (or empty)", "password": False},
-        ],
-    },
-'''
-    # Insert before the closing ] of _PLATFORMS
-    marker = ']'
-    # Find the last occurrence that closes _PLATFORMS (after the dingtalk/weixin block)
-    # Look for the pattern with help key and then closing bracket
-    idx = content.rfind('        ],\n    },\n]')
-    if idx == -1:
-        fail("Cannot find _PLATFORMS closing bracket in gateway.py")
-        return False
-    content = content[:idx+len('        ],\n    },')] + block + content[idx+len('        ],\n    },'):]
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched hermes_cli/gateway.py")
-    return True
-
-def patch_status_py(path):
-    """Add QQ OneBot to status display."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if "QQ OneBot" in content:
-        warn("hermes_cli/status.py already has QQ OneBot, skipping")
-        return False
-
-    backup_file(path)
-    content = content.replace(
-        '        "QQBot": ("QQ_APP_ID", "QQBOT_HOME_CHANNEL"),',
-        '        "QQBot": ("QQ_APP_ID", "QQBOT_HOME_CHANNEL"),\n        "QQ OneBot": ("QQ_ONEBOT_API_URL", "QQ_ONEBOT_HOME_CHANNEL"),'
-    )
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched hermes_cli/status.py")
-    return True
-
-def patch_toolsets_py(path):
-    """Add hermes-qq toolset definition."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if '"hermes-qq"' in content:
-        warn("hermes-qq toolset already exists, skipping")
-        return False
-
-    backup_file(path)
-
-    # Add hermes-qq toolset after hermes-qqbot
-    old = '    "hermes-qqbot": {\n        "description": "QQBot toolset - QQ messaging via official bot API (full access)",\n        "tools": _HERMES_CORE_TOOLS,\n        "includes": []\n    },\n\n    "hermes-wecom":'
-    new = '    "hermes-qqbot": {\n        "description": "QQBot toolset - QQ messaging via official bot API (full access)",\n        "tools": _HERMES_CORE_TOOLS,\n        "includes": []\n    },\n\n    "hermes-qq": {\n        "description": "QQ OneBot v11 toolset - QQ messaging via NapCat/go-cqhttp (full access)",\n        "tools": _HERMES_CORE_TOOLS,\n        "includes": []\n    },\n\n    "hermes-wecom":'
-    if old not in content:
-        # Try alternate pattern
-        old2 = '    "hermes-qqbot": {'
-        if old2 not in content:
-            fail("Cannot find hermes-qqbot toolset in toolsets.py")
-            return False
-        # Find the closing of hermes-qqbot
-        idx = content.find(old2)
-        close_idx = content.find("},", idx) + 2
-        # Insert after hermes-qqbot
-        content = content[:close_idx] + '\n\n    "hermes-qq": {\n        "description": "QQ OneBot v11 toolset - QQ messaging via NapCat/go-cqhttp (full access)",\n        "tools": _HERMES_CORE_TOOLS,\n        "includes": []\n    },' + content[close_idx:]
-    else:
-        content = content.replace(old, new)
-
-    # Add hermes-qq to hermes-gateway includes
-    content = content.replace(
-        '"hermes-qqbot", "hermes-webhook"]',
-        '"hermes-qqbot", "hermes-qq", "hermes-webhook"]'
-    )
-
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched toolsets.py")
-    return True
-
-
-def patch_send_message_tool(path):
-    """Add QQ OneBot media sending support to send_message_tool.py."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if "_send_qq_onebot_with_media" in content:
-        warn("send_message_tool.py already has QQ OneBot media support, skipping")
-        return False
-
-    backup_file(path)
-    changed = False
-
-    # 1. Add QQ dispatch block before "# --- Non-Telegram/Discord platforms ---"
-    marker1 = "    # --- Non-Telegram/Discord platforms ---"
-    if marker1 in content:
-        qq_block = (
-            "    # --- QQ: special handling for media attachments (like Telegram/Discord) ---\n"
-            "    if platform == Platform.QQ:\n"
-            "        last_result = None\n"
-            "        for i, chunk in enumerate(chunks):\n"
-            "            is_last = (i == len(chunks) - 1)\n"
-            "            result = await _send_qq_onebot_with_media(\n"
-            "                pconfig.extra, chat_id, chunk,\n"
-            "                media_files=media_files if is_last else [],\n"
-            "            )\n"
-            "            if isinstance(result, dict) and result.get(\"error\"):\n"
-            "                return result\n"
-            "            last_result = result\n"
-            "        return last_result\n"
-            "\n"
-        )
-        content = content.replace(marker1, qq_block + marker1, 1)
-        changed = True
-
-    # 2. Add QQ elif case after QQBOT in the dispatch chain
-    marker2 = "            result = await _send_qqbot(pconfig, chat_id, chunk)"
-    qq_elif = (
-        "\n"
-        "        elif platform == Platform.QQ:\n"
-        "            result = await _send_qq_onebot_with_media(pconfig.extra, chat_id, chunk, media_files=media_files if is_last else [])"
-    )
-    if marker2 in content and "Platform.QQ" not in content.split(marker2)[1][:200]:
-        content = content.replace(marker2, marker2 + qq_elif, 1)
-        changed = True
-
-    # 3. Add _send_qq_onebot_with_media function after _send_qq_onebot or _send_qqbot
-    func_def = '\n\nasync def _send_qq_onebot_with_media(extra, chat_id, message, media_files=None):\n    """Send via QQ OneBot v11, prefer WS, fallback to HTTP API."""\n    media_files = media_files or []\n    segments = []\n    if message.strip():\n        segments.append({"type": "text", "data": {"text": message[:4000]}})\n    for media_path, is_voice in media_files:\n        if not os.path.exists(media_path):\n            logger.warning(f"Media file not found: {media_path}")\n            continue\n        ext = os.path.splitext(media_path)[1].lower()\n        if ext in _IMAGE_EXTS:\n            segments.append({"type": "image", "data": {"file": f"file:///{media_path}"}})\n        elif ext in _AUDIO_EXTS:\n            segments.append({"type": "record", "data": {"file": f"file:///{media_path}"}})\n        else:\n            segments.append({"type": "file", "data": {"file": media_path}})\n    if not segments:\n        return _error("No valid message content to send")\n    if str(chat_id).startswith("group:"):\n        msg_type, target_id = "group", chat_id.split(":", 1)[1]\n    elif str(chat_id).startswith("user:"):\n        msg_type, target_id = "private", chat_id.split(":", 1)[1]\n    else:\n        msg_type, target_id = "group", str(chat_id)\n    try:\n        from gateway.platforms.qq import get_ws_client\n        ws_client = get_ws_client()\n        if ws_client and ws_client._ws:\n            logger.info("[qq] Sending via WS to %s %s", msg_type, target_id)\n            if msg_type == "group":\n                result = await ws_client.send_group_msg(target_id, segments)\n            else:\n                result = await ws_client.send_private_msg(target_id, segments)\n            if result.get("status") == "ok":\n                return {"success": True, "platform": "qq", "chat_id": chat_id,\n                        "message_id": result.get("data", {}).get("message_id")}\n            logger.warning("[qq] WS send failed (%s), trying HTTP fallback", result.get("msg"))\n    except Exception as e:\n        logger.warning("[qq] WS send error: %s, trying HTTP fallback", e)\n    logger.info("[qq] WS unavailable, falling back to HTTP API")\n    try:\n        import httpx\n    except ImportError:\n        return _error("QQ OneBot WS unavailable and httpx not installed for HTTP fallback")\n    http_api_url = extra.get("http_api_url", "") or os.getenv("QQ_HTTP_API_URL", "")\n    if not http_api_url:\n        api_host = extra.get("api_host", "")\n        api_port = extra.get("api_port", "")\n        if not api_host or not api_port:\n            ws_host = extra.get("ws_host", "127.0.0.1")\n            ws_port = int(extra.get("ws_port", 3001))\n            api_host = ws_host\n            api_port = ws_port - 1\n        http_api_url = f"http://{api_host}:{api_port}"\n    access_token = extra.get("access_token", "") or os.getenv("QQ_ONEBOT_ACCESS_TOKEN", "")\n    try:\n        async with httpx.AsyncClient(timeout=15) as client:\n            headers = {}\n            if access_token:\n                headers["Authorization"] = f"Bearer {access_token}"\n            url = f"{http_api_url}/send_msg"\n            payload = {"message": segments}\n            if str(chat_id).startswith("group:"):\n                payload["group_id"] = int(chat_id.split(":", 1)[1])\n            elif str(chat_id).startswith("user:"):\n                payload["user_id"] = int(chat_id.split(":", 1)[1])\n            else:\n                payload["group_id"] = int(chat_id)\n            resp = await client.post(url, json=payload, headers=headers)\n            if resp.status_code == 200:\n                data = resp.json()\n                if data.get("status") == "ok":\n                    return {"success": True, "platform": "qq", "chat_id": chat_id,\n                            "message_id": data.get("data", {}).get("message_id")}\n                else:\n                    return _error(f"QQ OneBot API error: {data.get(\'msg\', \'unknown\')}")\n            else:\n                return _error(f"QQ OneBot send failed: HTTP {resp.status_code}")\n    except Exception as e:\n        return _error(f"QQ OneBot send failed: {e}")\n'
-    anchor = None
-    for candidate in ["async def _send_qq_onebot(", "async def _send_qqbot("]:
-        idx = content.find(candidate)
-        if idx != -1:
-            next_func = content.find("\nasync def ", idx + 1)
-            if next_func != -1:
-                anchor = next_func
-                break
-    if anchor is not None:
-        content = content[:anchor] + func_def + content[anchor:]
-        changed = True
-    else:
-        fail("Cannot find _send_qq_onebot or _send_qqbot to anchor media function")
-
-    if changed:
-        with open(path, "w") as f:
-            f.write(content)
-        ok("Patched tools/send_message_tool.py (QQ OneBot media support)")
-    return changed
-
-def patch_prompt_builder(path):
-    """Add QQ platform context to prompt_builder.py platform_messages dict."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if '"qq": (' in content and 'OneBot' in content:
-        warn("prompt_builder.py already has QQ context, skipping")
-        return False
-
-    backup_file(path)
-    block = '''    "qq": (
-        "You are on QQ (via OneBot v11 / NapCat). QQ supports text and emoji. "
-        "Do NOT use markdown formatting (no **bold**, no ## headers, no ```code blocks```, "
-        "no [links](url), no lists with -). QQ renders markdown as raw text. "
-        "Use plain text with natural line breaks only. "
-        "You can send media files natively: include MEDIA:/absolute/path/to/file in "
-        "your response. Images are sent as native photos."
-    ),
-'''
-    # Insert before the closing } of the PLATFORM_HINTS dict
-    # Find the dict's closing brace — it's the first '}' after 'PLATFORM_HINTS = {'
-    hints_start = content.find('PLATFORM_HINTS = {')
-    if hints_start == -1:
-        fail("Cannot find 'PLATFORM_HINTS = {' in prompt_builder.py")
-        return False
-    closing = content.find('\n}', hints_start)
-    if closing == -1:
-        fail("Cannot find closing '}' of PLATFORM_HINTS dict")
-        return False
-    # Insert block right before the closing brace
-    insert_pos = closing + 1  # position of the '\n' before '}'
-    content = content[:insert_pos] + block + content[insert_pos:]
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched agent/prompt_builder.py (QQ platform context)")
-    return True
-
-
-def patch_init_py(path):
-    """Add QQAdapter import to __init__.py."""
-    with open(path, "r") as f:
-        content = f.read()
-
-    if "from .qq import QQAdapter" in content:
-        warn("__init__.py already has QQ import, skipping")
-        return False
-
-    backup_file(path)
-
-    # Only add if qqbot import exists (to place it correctly)
-    if "from .qqbot import QQAdapter" in content:
-        content = content.replace(
-            "from .qqbot import QQAdapter",
-            "from .qqbot import QQAdapter\nfrom .qq import QQAdapter as QQOneBotAdapter"
-        )
-        content = content.replace(
-            '    "QQAdapter",',
-            '    "QQAdapter",\n    "QQOneBotAdapter",'
-        )
-    else:
-        # Insert before __all__
-        content = content.replace(
-            '__all__ = [',
-            'from .qq import QQAdapter as QQOneBotAdapter\n\n__all__ = [\n    "QQOneBotAdapter",'
-        )
-
-    with open(path, "w") as f:
-        f.write(content)
-    ok("Patched __init__.py")
-    return True
-
-def copy_adapter(hermes_dir):
-    """Copy qq_adapter.py to gateway/platforms/qq.py."""
-    dest = os.path.join(hermes_dir, "gateway", "platforms", "qq.py")
+def install_adapter():
+    """Copy qq_adapter.py to hermes gateway platforms."""
     src = SCRIPT_DIR / "qq_adapter.py"
-    if os.path.exists(dest):
-        # Check if same content
-        with open(src, "rb") as f1, open(dest, "rb") as f2:
-            if f1.read() == f2.read():
-                warn("qq.py already installed and up to date")
-                return False
-    backup_file(dest) if os.path.exists(dest) else None
-    shutil.copy2(src, dest)
-    ok("Installed gateway/platforms/qq.py")
+    dst = HERMES_AGENT / "gateway" / "platforms" / "qqonebot.py"
+    
+    if not src.is_file():
+        fail(f"Adapter file not found: {src}")
+        return False
+    
+    # Backup existing file
+    if dst.is_file():
+        backup = dst.with_suffix(".py.bak")
+        if not backup.is_file():
+            shutil.copy2(dst, backup)
+            info(f"Backed up existing adapter: {backup.name}")
+    
+    shutil.copy2(src, dst)
+    ok(f"Installed adapter: {dst}")
     return True
 
-def install_websockets(hermes_dir):
-    """Install websockets in the hermes venv."""
-    venv_pip = os.path.join(hermes_dir, "venv", "bin", "pip")
-    if os.path.exists(venv_pip):
-        info("Installing websockets in hermes venv...")
-        ret = subprocess.run([venv_pip, "install", "-q", "websockets"],
-                           capture_output=True, text=True)
-        if ret.returncode == 0:
-            ok("websockets installed")
+def install_plugin():
+    """Copy plugin files to hermes plugins directory."""
+    src = SCRIPT_DIR / "plugins" / "qqonebot"
+    dst = PLUGINS_DIR / "qqonebot"
+    
+    if not src.is_dir():
+        fail(f"Plugin directory not found: {src}")
+        return False
+    
+    # Backup existing plugin
+    if dst.is_dir():
+        backup = dst.with_name("qqonebot.bak")
+        if backup.is_dir():
+            shutil.rmtree(backup)
+        shutil.move(str(dst), str(backup))
+        info(f"Backed up existing plugin: {backup.name}")
+    
+    shutil.copytree(src, dst)
+    ok(f"Installed plugin: {dst}")
+    return True
+
+def enable_plugin():
+    """Enable the qqonebot plugin."""
+    try:
+        result = subprocess.run(
+            ["hermes", "plugins", "enable", "qqonebot"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            ok("Plugin enabled")
+            return True
         else:
-            warn(f"pip install websockets failed: {ret.stderr.strip()}")
-    else:
-        warn("Could not find hermes venv pip, please run: pip install websockets")
+            warn(f"Could not enable plugin: {result.stderr}")
+            info("Run manually: hermes plugins enable qqonebot")
+            return False
+    except FileNotFoundError:
+        warn("hermes command not found")
+        info("Run manually: hermes plugins enable qqonebot")
+        return False
 
-def do_uninstall(hermes_dir):
-    """Restore all backed up files and remove qq.py."""
-    info("Uninstalling hermes-qq-onebot...")
-    qq_path = os.path.join(hermes_dir, "gateway", "platforms", "qq.py")
-    if os.path.exists(qq_path):
-        os.remove(qq_path)
-        ok("Removed gateway/platforms/qq.py")
-
-    for fname in [
-        "gateway/config.py",
-        "gateway/run.py",
-        "gateway/platforms/__init__.py",
-        "agent/prompt_builder.py",
-        "hermes_cli/platforms.py",
-        "hermes_cli/gateway.py",
-        "hermes_cli/status.py",
-        "toolsets.py",
-        "tools/send_message_tool.py",
-    ]:
-        path = os.path.join(hermes_dir, fname)
-        bak = path + ".bak"
-        if os.path.exists(bak):
-            shutil.copy2(bak, path)
-            os.remove(bak)
-            ok(f"Restored {fname}")
-    ok("Uninstall complete. Restart hermes gateway.")
+def install_deps():
+    """Install Python dependencies."""
+    try:
+        import websockets
+        ok("websockets already installed")
+        return True
+    except ImportError:
+        info("Installing websockets...")
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "websockets"], check=True)
+            ok("websockets installed")
+            return True
+        except subprocess.CalledProcessError:
+            fail("Failed to install websockets")
+            info("Run manually: pip install websockets")
+            return False
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "uninstall":
-        hermes_dir = find_hermes_dir()
-        if not hermes_dir:
-            fail("Could not find hermes-agent installation")
-            sys.exit(1)
-        do_uninstall(hermes_dir)
-        return
-
-    print(f"\n{BOLD}hermes-qq-onebot installer{RESET}\n")
-
-    hermes_dir = find_hermes_dir()
-    if not hermes_dir:
-        fail("Could not find hermes-agent installation.")
-        info("Set HERMES_HOME env var or install to ~/.hermes/hermes-agent")
-        sys.exit(1)
-
-    info(f"Hermes directory: {hermes_dir}")
-
-    # Verify it's a hermes installation
-    if not os.path.isfile(os.path.join(hermes_dir, "run_agent.py")):
-        fail("Directory does not look like hermes-agent (no run_agent.py)")
-        sys.exit(1)
-
-    changed = False
-
-    # Copy adapter file
-    changed |= copy_adapter(hermes_dir)
-
-    # Patch files
-    patches = [
-        ("gateway/config.py",      [patch_enum_platform, patch_config_connected, patch_config_env_overrides]),
-        ("gateway/run.py",          [patch_run_py]),
-        ("gateway/platforms/__init__.py", [patch_init_py]),
-        ("agent/prompt_builder.py", [patch_prompt_builder]),
-        ("hermes_cli/platforms.py", [patch_platforms_py]),
-        ("hermes_cli/gateway.py",   [patch_gateway_py]),
-        ("hermes_cli/status.py",    [patch_status_py]),
-        ("toolsets.py",             [patch_toolsets_py]),
-        ("tools/send_message_tool.py", [patch_send_message_tool]),
-    ]
-
-    for relpath, patch_fns in patches:
-        path = os.path.join(hermes_dir, relpath)
-        if not os.path.exists(path):
-            fail(f"File not found: {relpath}")
-            continue
-        for fn in patch_fns:
-            try:
-                changed |= fn(path)
-            except Exception as e:
-                fail(f"Error patching {relpath}: {e}")
-
-    # Install dependency
-    install_websockets(hermes_dir)
-
+    print(f"\n{BOLD}hermes-qq-onebot Installer (Plugin Mode){RESET}\n")
+    
+    if not check_hermes():
+        return 1
+    
+    info(f"Hermes home: {HERMES_HOME}")
+    info(f"Hermes agent: {HERMES_AGENT}")
     print()
-    if changed:
-        ok("Installation complete!")
-        print(f"\n  {BOLD}Next steps:{RESET}")
-        print(f"  1. Add QQ config to ~/.hermes/config.yaml or set env vars")
-        print(f"  2. Restart hermes gateway: hermes gateway restart")
-        print(f"  3. Run ./install.sh uninstall to remove\n")
-    else:
-        info("Everything already installed, nothing to do.")
+    
+    # Install adapter
+    info("Installing QQ OneBot adapter...")
+    if not install_adapter():
+        return 1
+    
+    # Install plugin
+    info("Installing plugin...")
+    if not install_plugin():
+        return 1
+    
+    # Enable plugin
+    info("Enabling plugin...")
+    enable_plugin()
+    
+    # Install dependencies
+    info("Checking dependencies...")
+    install_deps()
+    
+    print()
+    ok("Installation complete!")
+    print()
+    info("Next steps:")
+    print("  1. Add qqonebot platform to ~/.hermes/config.yaml:")
+    print()
+    print("     platforms:")
+    print("       qqonebot:")
+    print("         enabled: true")
+    print("         extra:")
+    print('           http_api_url: "http://127.0.0.1:5700"')
+    print("           reverse_mode: true")
+    print('           reverse_host: "0.0.0.0"')
+    print("           reverse_port: 6700")
+    print()
+    print("  2. Restart gateway: hermes gateway restart")
+    print()
+    
+    return 0
+
+def uninstall():
+    """Uninstall the QQ OneBot plugin."""
+    print(f"\n{BOLD}hermes-qq-onebot Uninstaller{RESET}\n")
+    
+    # Disable plugin
+    info("Disabling plugin...")
+    try:
+        subprocess.run(["hermes", "plugins", "disable", "qqonebot"], capture_output=True)
+    except FileNotFoundError:
+        pass
+    
+    # Remove adapter
+    adapter = HERMES_AGENT / "gateway" / "platforms" / "qqonebot.py"
+    if adapter.is_file():
+        adapter.unlink()
+        ok(f"Removed adapter: {adapter}")
+    
+    # Restore backup if exists
+    backup = adapter.with_suffix(".py.bak")
+    if backup.is_file():
+        shutil.move(str(backup), str(adapter))
+        info(f"Restored backup: {adapter}")
+    
+    # Remove plugin
+    plugin = PLUGINS_DIR / "qqonebot"
+    if plugin.is_dir():
+        shutil.rmtree(plugin)
+        ok(f"Removed plugin: {plugin}")
+    
+    # Restore plugin backup if exists
+    plugin_backup = plugin.with_name("qqonebot.bak")
+    if plugin_backup.is_dir():
+        shutil.move(str(plugin_backup), str(plugin))
+        info(f"Restored plugin backup: {plugin}")
+    
+    print()
+    ok("Uninstallation complete!")
+    print()
+    info("Restart gateway: hermes gateway restart")
+    
+    return 0
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "uninstall":
+        sys.exit(uninstall())
+    else:
+        sys.exit(main())

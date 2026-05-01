@@ -1,4 +1,5 @@
 #!/bin/bash
-# hermes-qq-onebot uninstaller
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec python3 "$SCRIPT_DIR/install.py" uninstall
+# Uninstall hermes-qq-onebot plugin
+set -e
+cd "$(dirname "$0")"
+python3 install.py uninstall
