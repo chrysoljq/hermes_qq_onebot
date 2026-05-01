@@ -29,25 +29,13 @@ QQ 客户端 ←→ OneBot 实现 (NapCat/go-cqhttp)
 - HTTP API 独立通道 (可与 WS 并用)
 - 消息去重
 
-## 安装（插件方式）
+## 安装
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/chrysoljq/hermes-qq-onebot.git
-cd hermes-qq-onebot
-
-# 2. 复制适配器到 hermes gateway platforms
-cp qqonebot.py ~/.hermes/hermes-agent/gateway/platforms/qqonebot.py
-
-# 3. 复制插件到 hermes plugins 目录
-cp -r plugins/qqonebot ~/.hermes/plugins/
-
-# 4. 启用插件
-hermes plugins enable qqonebot
-
-# 5. 安装依赖
-pip install websockets
+hermes plugins install chrysoljq/hermes-qq-onebot --enable
 ```
+
+安装完成后，插件会提示输入 `QQ_ONEBOT_WS_URL` 环境变量（可选，留空使用 config.yaml 配置）。
 
 ## 配置
 
@@ -89,15 +77,7 @@ QQ_HOME_CHANNEL=qq_group_123456789                    # 默认发送目标
 ## 卸载
 
 ```bash
-# 1. 禁用插件
-hermes plugins disable qqonebot
-
-# 2. 删除文件
-rm ~/.hermes/hermes-agent/gateway/platforms/qqonebot.py
-rm -rf ~/.hermes/plugins/qqonebot
-
-# 3. 重启 gateway
-hermes gateway restart
+hermes plugins remove qqonebot
 ```
 
 ## 文件说明
@@ -105,22 +85,32 @@ hermes gateway restart
 ```
 hermes-qq-onebot/
 ├── qqonebot.py            # QQ 适配器主文件
-├── plugins/
-│   └── qqonebot/
-│       ├── plugin.yaml    # 插件声明
-│       ├── __init__.py    # 导出 register
-│       └── adapter.py     # 注册到 platform_registry
+├── plugin.yaml            # 插件声明
+├── __init__.py            # 导出 register
+├── adapter.py             # 注册到 platform_registry
 ├── README.md
 └── ...
 ```
 
-## 与旧版安装方式的区别
+## 手动安装（不推荐）
 
-旧版使用 `install.py` 修改 hermes 核心代码（补丁方式），新版使用插件系统：
+如果无法使用 `hermes plugins install`，可以手动安装：
 
-| 项目 | 旧版（补丁） | 新版（插件） |
-|------|-------------|-------------|
-| 安装方式 | 修改核心代码 | 独立插件目录 |
-| 更新 hermes | 需要重新打补丁 | 不受影响 |
-| 卸载 | 需要恢复备份 | 删除插件即可 |
-| 配置位置 | `platforms.qq` | `platforms.qqonebot` |
+```bash
+# 1. 克隆仓库
+git clone https://github.com/chrysoljq/hermes-qq-onebot.git
+cd hermes-qq-onebot
+
+# 2. 复制到 hermes plugins 目录
+mkdir -p ~/.hermes/plugins/qqonebot
+cp qqonebot.py plugin.yaml __init__.py adapter.py ~/.hermes/plugins/qqonebot/
+
+# 3. 启用插件
+hermes plugins enable qqonebot
+
+# 4. 安装依赖
+pip install websockets
+
+# 5. 重启 gateway
+hermes gateway restart
+```
