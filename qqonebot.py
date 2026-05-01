@@ -408,7 +408,7 @@ class QQAdapter(BasePlatformAdapter):
     MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
 
     def __init__(self, config: PlatformConfig):
-        super().__init__(config, Platform.QQ)
+        super().__init__(config, Platform("qqonebot"))
         extra = config.extra or {}
 
         # WebSocket config
