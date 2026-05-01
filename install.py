@@ -41,7 +41,7 @@ def check_hermes():
 
 def install_adapter():
     """Copy qq_adapter.py to hermes gateway platforms."""
-    src = SCRIPT_DIR / "qq_adapter.py"
+    src = SCRIPT_DIR / "qqonebot.py"
     dst = HERMES_AGENT / "gateway" / "platforms" / "qqonebot.py"
     
     if not src.is_file():

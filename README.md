@@ -37,7 +37,7 @@ git clone https://github.com/chrysoljq/hermes-qq-onebot.git
 cd hermes-qq-onebot
 
 # 2. 复制适配器到 hermes gateway platforms
-cp qq_adapter.py ~/.hermes/hermes-agent/gateway/platforms/qqonebot.py
+cp qqonebot.py ~/.hermes/hermes-agent/gateway/platforms/qqonebot.py
 
 # 3. 复制插件到 hermes plugins 目录
 cp -r plugins/qqonebot ~/.hermes/plugins/
@@ -104,7 +104,7 @@ hermes gateway restart
 
 ```
 hermes-qq-onebot/
-├── qq_adapter.py          # QQ 适配器主文件
+├── qqonebot.py            # QQ 适配器主文件
 ├── plugins/
 │   └── qqonebot/
 │       ├── plugin.yaml    # 插件声明
