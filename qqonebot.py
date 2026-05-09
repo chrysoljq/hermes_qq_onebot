@@ -1258,35 +1258,3 @@ class QQAdapter(BasePlatformAdapter):
                 logger.debug("[qq] Resolved group %s → %s", group_id, name)
         except Exception as e:
             logger.debug("[qq] Failed to resolve group %s: %s", group_id, e)
-
-
-def check_requirements() -> bool:
-    """Check if OneBot QQ runtime dependencies are available."""
-    try:
-        import websockets
-        return True
-    except ImportError:
-        return False
-
-
-def register(ctx):
-    """Plugin entry point — called by the Hermes plugin system."""
-    ctx.register_platform(
-        name="qqonebot",
-        label="QQ OneBot",
-        adapter_factory=lambda cfg: QQAdapter(cfg),
-        check_fn=check_requirements,
-        required_env=[],
-        install_hint="pip install websockets",
-        max_message_length=4500,
-        emoji="🐧",
-        pii_safe=False,
-        allow_update_command=True,
-        allowed_users_env="QQ_ONEBOT_ALLOWED_USERS",
-        allow_all_env="QQ_ONEBOT_ALLOW_ALL_USERS",
-        platform_hint=(
-            "You are chatting via QQ through OneBot v11 protocol. "
-            "Supports text, images, voice messages, and file uploads. "
-            "In group chats, users may @mention you or use keyword triggers."
-        ),
-    )
