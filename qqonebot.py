@@ -942,6 +942,18 @@ class QQAdapter(BasePlatformAdapter):
             elif chat_id.startswith("qq_"):
                 target_id = chat_id.removeprefix("qq_")
                 msg_type = "private"
+            elif chat_id.lstrip("-").isdigit():
+                # Bare numeric chat_id — check delivery_info with common prefixes
+                target_id = chat_id
+                for prefix in (f"qq_group_{chat_id}", f"qq_{chat_id}"):
+                    info = self._delivery_info.get(prefix, {})
+                    if info.get("target_id"):
+                        msg_type = info["message_type"]
+                        target_id = info["target_id"]
+                        break
+                if not msg_type:
+                    # Default to private for bare numeric IDs (direct tool calls)
+                    msg_type = "private"
 
         return msg_type or "private", str(target_id)
 
@@ -1104,7 +1116,7 @@ class QQAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="OneBot HTTP client not initialized")
         
         segments = []
-        if caption.strip():
+        if caption and caption.strip():
             segments.append(_text_segment(caption))
         segments.append(_image_segment(image_url))
 
@@ -1126,7 +1138,7 @@ class QQAdapter(BasePlatformAdapter):
         for image messages, causing 60s timeouts).  Falls back to WS otherwise.
         """
         # Send caption text first if present
-        if caption.strip():
+        if caption and caption.strip():
             try:
                 await self.send(chat_id, caption)
             except Exception:
@@ -1217,7 +1229,7 @@ class QQAdapter(BasePlatformAdapter):
         try:
             message_type, target_id = self._get_delivery_target(chat_id)
 
-            if caption.strip():
+            if caption and caption.strip():
                 if message_type == "group":
                     await self._ws_client.send_group_msg(target_id, [_text_segment(caption)])
                 else:
@@ -1246,3 +1258,35 @@ class QQAdapter(BasePlatformAdapter):
                 logger.debug("[qq] Resolved group %s → %s", group_id, name)
         except Exception as e:
             logger.debug("[qq] Failed to resolve group %s: %s", group_id, e)
+
+
+def check_requirements() -> bool:
+    """Check if OneBot QQ runtime dependencies are available."""
+    try:
+        import websockets
+        return True
+    except ImportError:
+        return False
+
+
+def register(ctx):
+    """Plugin entry point — called by the Hermes plugin system."""
+    ctx.register_platform(
+        name="qqonebot",
+        label="QQ OneBot",
+        adapter_factory=lambda cfg: QQAdapter(cfg),
+        check_fn=check_requirements,
+        required_env=[],
+        install_hint="pip install websockets",
+        max_message_length=4500,
+        emoji="🐧",
+        pii_safe=False,
+        allow_update_command=True,
+        allowed_users_env="QQ_ONEBOT_ALLOWED_USERS",
+        allow_all_env="QQ_ONEBOT_ALLOW_ALL_USERS",
+        platform_hint=(
+            "You are chatting via QQ through OneBot v11 protocol. "
+            "Supports text, images, voice messages, and file uploads. "
+            "In group chats, users may @mention you or use keyword triggers."
+        ),
+    )
